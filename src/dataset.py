@@ -45,9 +45,9 @@ class LatentMNISTDataset(Dataset):
             for imgs, labels in dataloader:
                 imgs = imgs.to(device)
                 # Encode images to latent space
-                moments = vae.encode(imgs)
+                mu, logvar = vae.encode(imgs)
                 # For a simple VAE, we take the mean or sample
-                latent = vae.reparameterize(*moments) 
+                latent = vae.reparameterize(mu, logvar) 
                 self.latents.append(latent.cpu())
                 self.labels.append(labels)
         
