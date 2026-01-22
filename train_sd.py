@@ -17,6 +17,10 @@ def train_latent_epoch(model, dataloader, diffusion, optimizer, device, config, 
     
     for latents, _ in pbar:
         latents = latents.to(device)
+
+        if len(latents.shape) == 2:
+            latents = latents.view(-1, 4, 8, 8)
+            
         t = torch.randint(0, config['diffusion']['timesteps'], (latents.shape[0],), device=device).long()
         
         noise = torch.randn_like(latents)
@@ -65,6 +69,10 @@ def main():
                     # Sample latent noise: [8, 4, 8, 8]
                     latent_shape = (8, config['vae']['latent_dim'], 8, 8)
                     z_samples = diffusion.sample(model, latent_shape)
+
+                    if len(z_samples.shape) == 2:
+                        z_samples = z_samples.view(-1, 4, 8, 8)
+                        
                     # Decode latents back to pixels
                     pixel_samples = vae.decode(z_samples)
                     
