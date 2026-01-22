@@ -1,10 +1,9 @@
-# Inference Settings for Comparison
-project_name: "mnist-diffusion-comparison"
+project_name: "DIFFUSION-COOKBOOK"
 
 sampling:
   method: "ddim"
-  steps: 50      # We jump 20 steps at a time (1000/50)
-  eta: 0.0       # Deterministic
+  steps: 50
+  eta: 0.0
   batch_size: 8
 
 model:
