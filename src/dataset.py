@@ -26,25 +26,21 @@ def get_dataloader(config):
 class LatentMNISTDataset(Dataset):
     def __init__(self, vae, dataloader, device):
         self.latents = []
-        self.labels = []
         print("Encoding images into latent space...")
         vae.eval()
         with torch.no_grad():
-            for imgs, labels in dataloader:
+            for imgs, _ in dataloader:
                 imgs = imgs.to(device)
-                # --- Unpack tuple and pass args separately ---
                 mu, logvar = vae.encode(imgs)
+                # Unpack explicitly
                 latent = vae.reparameterize(mu, logvar)
-                
                 self.latents.append(latent.cpu())
-                self.labels.append(labels)
                 
         self.latents = torch.cat(self.latents, dim=0)
-        self.labels = torch.cat(self.labels, dim=0)
-        print(f"Latent Dataset Created. Shape: {self.latents.shape}")
+        print(f"Latent Dataset Shape: {self.latents.shape}")
 
     def __len__(self):
         return len(self.latents)
 
     def __getitem__(self, idx):
-        return self.latents[idx], self.labels[idx]
+        return self.latents[idx], 0 # Dummy label
