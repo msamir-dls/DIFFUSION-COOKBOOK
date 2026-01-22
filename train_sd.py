@@ -17,14 +17,10 @@ def train_latent_epoch(model, dataloader, diffusion, optimizer, device, config, 
     
     for latents, _ in pbar:
         latents = latents.to(device)
-
-        if len(latents.shape) == 2:
-            latents = latents.view(-1, 4, 8, 8)
-            
+        
         t = torch.randint(0, config['diffusion']['timesteps'], (latents.shape[0],), device=device).long()
         
         noise = torch.randn_like(latents)
-        # We add noise to the LATENTS, not the pixels!
         x_noisy = diffusion.q_sample(x_start=latents, t=t, noise=noise)
         
         optimizer.zero_grad()
@@ -42,18 +38,16 @@ def main():
     config = load_config("configs/stable_diffusion.yaml")
     device = get_device()
     
-    # 1. Initialize VAE and pre-encode dataset
-    # In a real scenario, you'd load a pre-trained VAE weight
+    # 1. Initialize VAE 
     vae = VAE(config).to(device)
-    # vae.load_state_dict(torch.load(config['vae']['pretrained_path']))
     
     pixel_loader = get_dataloader(config)
+    
+    # 2. Pre-encode Latents (This will now use the new Spatial VAE)
     latent_ds = LatentMNISTDataset(vae, pixel_loader, device)
     latent_loader = torch.utils.data.DataLoader(latent_ds, batch_size=config['train']['batch_size'], shuffle=True)
 
     with mlflow.start_run(run_name=config['run_name']):
-        setup_mlflow(config)
-        
         model = LatentUNet(config).to(device)
         diffusion = GaussianDiffusion(config).to(device)
         optimizer = torch.optim.Adam(model.parameters(), lr=config['train']['lr'])
@@ -62,22 +56,14 @@ def main():
             avg_loss = train_latent_epoch(model, latent_loader, diffusion, optimizer, device, config, epoch)
             mlflow.log_metric("latent_loss", avg_loss, step=epoch)
             
-            # Sampling: Latent -> UNet -> VAE Decoder -> Image
             if epoch % 5 == 0:
                 model.eval()
                 with torch.no_grad():
-                    # Sample latent noise: [8, 4, 8, 8]
+                    # Sample spatial latents [8, 4, 8, 8]
                     latent_shape = (8, config['vae']['latent_dim'], 8, 8)
                     z_samples = diffusion.sample(model, latent_shape)
-
-                    if len(z_samples.shape) == 2:
-                        z_samples = z_samples.view(-1, 4, 8, 8)
-                        
-                    # Decode latents back to pixels
                     pixel_samples = vae.decode(z_samples)
-                    
-                    # Log artifacts/visuals...
-                    print(f"[*] Sampled {pixel_samples.shape} images via Stable Diffusion path.")
+                    print(f"[*] Sampled {pixel_samples.shape} images.")
 
         save_checkpoint(model, optimizer, config['train']['epochs'], "checkpoints/sd_latent_final.pth")
 
