@@ -1,71 +1,76 @@
 import torch
 import torch.nn as nn
-from src.models.unet import TimeEmbedding, ResidualBlock, Swish
+from .unet import DownSample, UpSample, ResBlock, TimeEmbedding
 
 class LatentUNet(nn.Module):
     def __init__(self, config):
         super().__init__()
-        # Stable Diffusion latents usually have 4 channels
-        c_in = config['vae']['latent_dim'] 
-        base_ch = config['model']['base_channels']
-        ch_mult = config['model']['channel_mult']
-        num_res = config['model']['num_res_blocks']
+        # --- CRITICAL: Use Latent Dim (4), not Image Channels (1) ---
+        in_channels = config['vae']['latent_dim']
         
-        self.init_conv = nn.Conv2d(c_in, base_ch, 3, padding=1)
-        time_dim = base_ch * 4
-        self.time_mlp = nn.Sequential(
-            TimeEmbedding(base_ch),
-            nn.Linear(base_ch, time_dim),
-            Swish(),
-            nn.Linear(time_dim, time_dim),
-        )
-
+        self.base_channels = config['model']['base_channels']
+        self.timesteps = config['diffusion']['timesteps']
+        
+        # Time Embedding
+        self.time_embed = TimeEmbedding(self.base_channels)
+        
+        # Initial Conv
+        self.init_conv = nn.Conv2d(in_channels, self.base_channels, kernel_size=3, padding=1)
+        
+        # Downsampling
         self.downs = nn.ModuleList()
-        curr_ch = base_ch
-        feat_chs = [base_ch]
+        ch = self.base_channels
+        channel_mults = config['model']['channel_mult'] # e.g. [1, 2]
         
-        for i, mult in enumerate(ch_mult):
-            out_ch = base_ch * mult
-            for _ in range(num_res):
-                self.downs.append(ResidualBlock(curr_ch, out_ch, time_dim))
-                curr_ch = out_ch
-                feat_chs.append(curr_ch)
-            if i != len(ch_mult) - 1:
-                self.downs.append(nn.Conv2d(curr_ch, curr_ch, 3, stride=2, padding=1))
-                feat_chs.append(curr_ch)
-
-        self.mid = ResidualBlock(curr_ch, curr_ch, time_dim)
+        current_mult = 1
+        for i, mult in enumerate(channel_mults):
+            out_ch = self.base_channels * mult
+            for _ in range(config['model']['num_res_blocks']):
+                self.downs.append(ResBlock(ch, out_ch, self.base_channels))
+                ch = out_ch
+            
+            if i != len(channel_mults) - 1:
+                self.downs.append(DownSample(ch))
+                
+        # Middle
+        self.mid_block1 = ResBlock(ch, ch, self.base_channels)
+        self.mid_attn = nn.Identity() # Simplification for MNIST
+        self.mid_block2 = ResBlock(ch, ch, self.base_channels)
         
+        # Upsampling
         self.ups = nn.ModuleList()
-        for i, mult in reversed(list(enumerate(ch_mult))):
-            out_ch = base_ch * mult
-            for _ in range(num_res + 1):
-                skip_ch = feat_chs.pop()
-                self.ups.append(ResidualBlock(curr_ch + skip_ch, out_ch, time_dim))
-                curr_ch = out_ch
+        for i, mult in reversed(list(enumerate(channel_mults))):
+            out_ch = self.base_channels * mult
+            for _ in range(config['model']['num_res_blocks'] + 1):
+                self.ups.append(ResBlock(ch + out_ch, out_ch, self.base_channels)) # concat skip
+                ch = out_ch
+            
             if i != 0:
-                self.ups.append(nn.ConvTranspose2d(curr_ch, curr_ch, 4, stride=2, padding=1))
-
-        self.final = nn.Sequential(
-            nn.GroupNorm(8, curr_ch),
-            Swish(),
-            nn.Conv2d(curr_ch, c_in, 3, padding=1)
-        )
+                self.ups.append(UpSample(ch))
+                
+        # Final
+        self.final_conv = nn.Conv2d(ch, in_channels, kernel_size=3, padding=1)
 
     def forward(self, x, t):
-        t_emb = self.time_mlp(t)
+        # Time
+        t_emb = self.time_embed(t)
+        
+        # Initial
         x = self.init_conv(x)
-        skips = [x]
+        
+        # Down
+        skips = []
         for layer in self.downs:
-            x = layer(x, t_emb) if isinstance(layer, ResidualBlock) else layer(x)
-            skips.append(x)
-        
-        x = self.mid(x, t_emb)
-        
-        for layer in self.ups:
-            if isinstance(layer, ResidualBlock):
-                x = torch.cat([x, skips.pop()], dim=1)
+            if isinstance(layer, ResBlock):
                 x = layer(x, t_emb)
+            elif isinstance(layer, DownSample):
+                x = layer(x)
+                skips.append(x)
             else:
                 x = layer(x)
-        return self.final(x)
+        
+        # Mid
+        x = self.mid_block1(x, t_emb)
+        x = self.mid_block2(x, t_emb)
+        
+        return self.final_conv(x)
