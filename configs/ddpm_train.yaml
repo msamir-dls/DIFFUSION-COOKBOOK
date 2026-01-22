@@ -1,5 +1,4 @@
-# Training Configuration for Standard DDPM (Pixel-space)
-project_name: "mnist-diffusion-comparison"
+project_name: "DIFFUSION-COOKBOOK"
 run_name: "ddpm-pixel-baseline"
 
 dataset:
@@ -10,11 +9,9 @@ dataset:
 
 model:
   type: "unet"
-  base_channels: 32
-  channel_mult: [1, 2, 4]
+  base_channels: 64
+  channel_mult: [1, 2, 2]
   num_res_blocks: 2
-  attention: [false, false, false]
-  dropout: 0.1
 
 diffusion:
   timesteps: 1000
@@ -25,10 +22,8 @@ diffusion:
 train:
   batch_size: 128
   lr: 0.0002
-  epochs: 20
-  save_every: 5
-  device: "cuda" # or "mps" / "cpu"
+  epochs: 5
+  device: "cuda"
 
 mlflow:
   experiment_name: "MNIST_Diffusion"
-  tracking_uri: "http://localhost:5000"
