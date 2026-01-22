@@ -17,6 +17,7 @@ def train_latent_epoch(model, dataloader, diffusion, optimizer, device, config, 
     
     for latents, _ in pbar:
         latents = latents.to(device)
+        # No reshaping needed! VAE now outputs [B, 4, 8, 8] correctly.
         
         t = torch.randint(0, config['diffusion']['timesteps'], (latents.shape[0],), device=device).long()
         
@@ -38,12 +39,11 @@ def main():
     config = load_config("configs/stable_diffusion.yaml")
     device = get_device()
     
-    # 1. Initialize VAE 
+    # 1. Initialize and Train VAE (Simplification: Using random VAE as encoder for now)
+    # Ideally, you would train this VAE on reconstruction loss first.
     vae = VAE(config).to(device)
     
     pixel_loader = get_dataloader(config)
-    
-    # 2. Pre-encode Latents (This will now use the new Spatial VAE)
     latent_ds = LatentMNISTDataset(vae, pixel_loader, device)
     latent_loader = torch.utils.data.DataLoader(latent_ds, batch_size=config['train']['batch_size'], shuffle=True)
 
@@ -59,13 +59,16 @@ def main():
             if epoch % 5 == 0:
                 model.eval()
                 with torch.no_grad():
-                    # Sample spatial latents [8, 4, 8, 8]
                     latent_shape = (8, config['vae']['latent_dim'], 8, 8)
                     z_samples = diffusion.sample(model, latent_shape)
                     pixel_samples = vae.decode(z_samples)
                     print(f"[*] Sampled {pixel_samples.shape} images.")
 
         save_checkpoint(model, optimizer, config['train']['epochs'], "checkpoints/sd_latent_final.pth")
+        
+        # --- CRITICAL FIX: Save the VAE too! ---
+        torch.save(vae.state_dict(), "checkpoints/sd_vae_mnist.pth")
+        print("[*] VAE weights saved.")
 
 if __name__ == "__main__":
     main()
