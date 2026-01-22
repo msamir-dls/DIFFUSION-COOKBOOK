@@ -1,22 +1,18 @@
-# Configuration for Stable Diffusion (Latent-space)
-project_name: "mnist-diffusion-comparison"
+project_name: "DIFFUSION-COOKBOOK"
 run_name: "stable-diffusion-latent"
 
-# --- ADD THIS SECTION ---
 dataset:
   name: "MNIST"
   root: "./data"
   img_size: 32
   channels: 1
-# ------------------------
 
 vae:
-  latent_dim: 4           # Compress 32x32x1 -> 8x8x4 latents
+  latent_dim: 4
   scaling_factor: 0.18215 
-  pretrained_path: "./checkpoints/sd_vae_mnist.pth"
 
 model:
-  type: "latent_unet"     
+  type: "latent_unet"
   base_channels: 64
   channel_mult: [1, 2]
   num_res_blocks: 2
@@ -28,9 +24,9 @@ diffusion:
   schedule: "scaled_linear"
 
 train:
-  batch_size: 256         
-  lr: 0.0001
-  epochs: 15
+  batch_size: 256
+  lr: 0.001
+  epochs: 10
   device: "cuda"
 
 mlflow:
