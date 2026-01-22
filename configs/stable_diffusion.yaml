@@ -1,0 +1,29 @@
+# Configuration for Stable Diffusion (Latent-space)
+project_name: "mnist-diffusion-comparison"
+run_name: "stable-diffusion-latent"
+
+vae:
+  latent_dim: 4           # Compress 32x32x1 -> 8x8x4 latents
+  scaling_factor: 0.18215 # Standard SD scaling factor
+  pretrained_path: "./checkpoints/sd_vae_mnist.pth"
+
+model:
+  type: "latent_unet"     # Smaller U-Net operating on 8x8 space
+  base_channels: 64
+  channel_mult: [1, 2]
+  num_res_blocks: 2
+
+diffusion:
+  timesteps: 1000
+  beta_start: 0.00085
+  beta_end: 0.0120
+  schedule: "scaled_linear"
+
+train:
+  batch_size: 256         # Can be larger because latents are small
+  lr: 0.0001
+  epochs: 15
+  device: "cuda"
+
+mlflow:
+  experiment_name: "MNIST_Diffusion"

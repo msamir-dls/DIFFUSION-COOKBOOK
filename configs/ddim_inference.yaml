@@ -1,0 +1,27 @@
+# Inference Configuration for I2I Comparison (DDPM vs DDIM vs SD)
+test_name: "mnist-i2i-benchmark-v1"
+
+checkpoint_paths:
+  ddpm_pixel: "checkpoints/ddpm_mnist_final.pth"
+  sd_latent: "checkpoints/sd_latent_final.pth"
+  vae: "checkpoints/sd_vae_mnist.pth"
+
+dataset:
+  channels: 1
+  img_size: 32
+
+sampling:
+  method: "ddim"
+  steps: 50               # Number of steps for DDIM to jump
+  eta: 0.0                # 0.0 for deterministic, 1.0 for stochastic
+  strength: 0.6           # 0.0 = original image, 1.0 = full noise
+  img_size: 32
+  batch_size: 8
+
+comparison:
+  experiment_name: "I2I_Inference_Benchmark"
+  calculate_ssim: true    # Structural Similarity Index for accuracy
+  save_plots: true
+
+mlflow:
+  tracking_uri: "http://localhost:5000"
