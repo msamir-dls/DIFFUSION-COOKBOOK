@@ -1,64 +1,42 @@
 import torch
 import numpy as np
-from tqdm import tqdm
 
 class DDIMSolver:
-    def __init__(self, config, alpha_cumprod):
-        """
-        alpha_cumprod: should be passed from the GaussianDiffusion instance 
-                      (diffusion.sqrt_alphas_cumprod ** 2)
-        """
-        self.alphas_cumprod = alpha_cumprod
-        self.timesteps = config['diffusion']['timesteps']
-        self.ddim_timesteps = config['sampling']['steps'] 
-        self.eta = config['sampling'].get('eta', 0.0) 
+    def __init__(self, config, alphas_cumprod):
+        self.timesteps = 1000 # Assumed total training steps
+        self.ddim_timesteps = config['sampling']['steps']
+        self.eta = config['sampling']['eta']
+        self.alphas_cumprod = alphas_cumprod
 
+        # Calculate stepping (e.g., 0, 20, 40...)
+        c = self.timesteps // self.ddim_timesteps
+        self.ddim_steps = np.asarray(list(range(0, self.timesteps, c))) + 1
+        
     def get_sampling_timesteps(self):
-        # Create a subsequence of timesteps (e.g., jumping by 20 if steps=50)
-        times = np.linspace(0, self.timesteps - 1, self.ddim_timesteps).astype(int)
-        times = times.tolist()
-        # Create pairs of (t, t_prev)
-        return list(reversed(list(zip(times[1:], times[:-1]))))
+        # Return list of (t, t_prev) pairs reversed
+        steps = np.flip(self.ddim_steps)
+        time_pairs = []
+        for i, step in enumerate(steps[:-1]):
+            time_pairs.append((step, steps[i+1]))
+        return time_pairs
 
-    @torch.no_grad()
-    def step(self, model, x, t, t_next):
-        # 1. Predict noise using the U-Net
-        et = model(x, t)
+    def step(self, model, x, t, t_prev):
+        # Implementation of DDIM non-markovian step
+        device = x.device
+        alpha_bar_t = self.alphas_cumprod[t].view(-1, 1, 1, 1).to(device)
+        alpha_bar_t_prev = self.alphas_cumprod[t_prev].view(-1, 1, 1, 1).to(device)
+        sigma = self.eta * torch.sqrt((1 - alpha_bar_t_prev) / (1 - alpha_bar_t) * (1 - alpha_bar_t / alpha_bar_t_prev))
         
-        # 2. Extract alpha_bar for current and next step
-        alpha_t = self.alphas_cumprod[t].view(-1, 1, 1, 1)
-        alpha_next = self.alphas_cumprod[t_next].view(-1, 1, 1, 1) if t_next >= 0 else torch.ones_like(alpha_t)
-
-        # 3. Predict "predicted x0" (Equation 12 in DDIM paper)
-        pred_x0 = (x - torch.sqrt(1 - alpha_t) * et) / torch.sqrt(alpha_t)
+        # Predict noise
+        epsilon = model(x, t)
         
-        # 4. Compute variance (sigma). If eta=0, sigma=0 (Deterministic)
-        sigma_t = self.eta * torch.sqrt((1 - alpha_next) / (1 - alpha_t) * (1 - alpha_t / alpha_next))
+        # Predict x0
+        pred_x0 = (x - torch.sqrt(1 - alpha_bar_t) * epsilon) / torch.sqrt(alpha_bar_t)
         
-        # 5. Compute "direction pointing to xt"
-        dir_xt = torch.sqrt(1 - alpha_next - sigma_t**2) * et
+        # Direction to xt
+        dir_xt = torch.sqrt(1 - alpha_bar_t_prev - sigma**2) * epsilon
         
-        # 6. Combine
-        x_next = torch.sqrt(alpha_next) * pred_x0 + dir_xt
+        # Noise
+        noise = sigma * torch.randn_like(x)
         
-        if self.eta > 0:
-            noise = torch.randn_like(x)
-            x_next += sigma_t * noise
-            
-        return x_next
-
-    @torch.no_grad()
-    def sample(self, model, shape):
-        """Full DDIM Sampling Loop (Faster than DDPM)."""
-        device = next(model.parameters()).device
-        b = shape[0]
-        img = torch.randn(shape, device=device)
-        
-        time_pairs = self.get_sampling_timesteps() # [(999, 979), (979, 959)...]
-        
-        for t, t_next in tqdm(time_pairs, desc=f'DDIM Sampling ({self.ddim_timesteps} steps)'):
-            t_batch = torch.full((b,), t, device=device, dtype=torch.long)
-            t_next_batch = torch.full((b,), t_next, device=device, dtype=torch.long)
-            img = self.step(model, img, t_batch, t_next_batch)
-            
-        return img
+        return torch.sqrt(alpha_bar_t_prev) * pred_x0 + dir_xt + noise
