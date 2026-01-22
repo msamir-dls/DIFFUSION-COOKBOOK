@@ -14,15 +14,10 @@ from src.dataset import get_dataloader
 
 @time_execution
 def i2i_ddpm(model, diffusion, x_start, strength=0.5):
-    """Pixel-space DDPM I2I translation."""
     device = x_start.device
     t_start = int(diffusion.timesteps * strength)
     t_idx = torch.full((x_start.shape[0],), t_start - 1, device=device).long()
-    
-    # Add noise to source image
     noisy_x = diffusion.q_sample(x_start, t_idx)
-    
-    # Denoise step-by-step
     img = noisy_x
     for i in reversed(range(0, t_start)):
         t = torch.full((x_start.shape[0],), i, device=device).long()
@@ -31,16 +26,12 @@ def i2i_ddpm(model, diffusion, x_start, strength=0.5):
 
 @time_execution
 def i2i_ddim(model, ddim_solver, x_start, strength=0.5):
-    """Pixel-space DDIM I2I translation (Accelerated)."""
     device = x_start.device
     t_start = int(ddim_solver.timesteps * strength)
-    
-    # Add noise
     t_idx = torch.full((x_start.shape[0],), t_start - 1, device=device).long()
     alpha_bar = ddim_solver.alphas_cumprod[t_idx].view(-1, 1, 1, 1)
     noisy_x = torch.sqrt(alpha_bar) * x_start + torch.sqrt(1 - alpha_bar) * torch.randn_like(x_start)
     
-    # Filter DDIM timesteps to only those below our start point
     time_pairs = ddim_solver.get_sampling_timesteps()
     time_pairs = [(t, tn) for t, tn in time_pairs if t < t_start]
     
@@ -53,9 +44,9 @@ def i2i_ddim(model, ddim_solver, x_start, strength=0.5):
 
 @time_execution
 def i2i_stable_diffusion(latent_model, vae, diffusion, x_start, strength=0.5):
-    """Latent-space (Stable Diffusion) I2I translation."""
     device = x_start.device
-    # 1. Encode to Latent
+    
+    # 1. Encode to Latent [B, 4, 8, 8]
     mu, logvar = vae.encode(x_start)
     latents = vae.reparameterize(mu, logvar)
     
@@ -70,7 +61,7 @@ def i2i_stable_diffusion(latent_model, vae, diffusion, x_start, strength=0.5):
         t = torch.full((latents.shape[0],), i, device=device).long()
         img_z = diffusion.p_sample(latent_model, img_z, t, i)
         
-    # 4. Decode back to Pixels
+    # 4. Decode
     return vae.decode(img_z)
 
 def main():
@@ -84,28 +75,36 @@ def main():
     latent_unet = LatentUNet(config_sd).to(device)
     vae = VAE(config_sd).to(device)
     
-    # Load weights (assuming you have trained these)
-    # pixel_unet.load_state_dict(torch.load("checkpoints/ddpm_mnist_final.pth")['model_state_dict'])
-    # latent_unet.load_state_dict(torch.load("checkpoints/sd_latent_final.pth")['model_state_dict'])
-    
+    # Load Weights
+    # NOTE: Ensure you have run train_ddpm.py first to get this file!
+    if hasattr(torch, 'load'): 
+        try:
+            pixel_unet.load_state_dict(torch.load("checkpoints/ddpm_mnist_final.pth")['model_state_dict'])
+        except:
+            print("[!] Warning: DDPM checkpoint not found. Results will be noise.")
+
+    latent_unet.load_state_dict(torch.load("checkpoints/sd_latent_final.pth")['model_state_dict'])
+    # Load the saved VAE weights ---
+    vae.load_state_dict(torch.load("checkpoints/sd_vae_mnist.pth"))
+    vae.eval()
+
     # Schedulers
     diffusion_pixel = GaussianDiffusion(config_ddpm).to(device)
     ddim_solver = DDIMSolver(config_infer, diffusion_pixel.sqrt_alphas_cumprod**2)
     diffusion_latent = GaussianDiffusion(config_sd).to(device)
 
-    # Prepare Data (8 source images)
+    # Prepare Data
     dataloader = get_dataloader(config_ddpm)
     source_images, _ = next(iter(dataloader))
     source_images = source_images[:8].to(device)
 
     mlflow.set_experiment("I2I_Comparison_Dashboard")
     with mlflow.start_run(run_name="i2i_speed_accuracy_benchmark"):
-        # Run Comparisons
         res_ddpm = i2i_ddpm(pixel_unet, diffusion_pixel, source_images, strength=0.6)
         res_ddim = i2i_ddim(pixel_unet, ddim_solver, source_images, strength=0.6)
         res_sd = i2i_stable_diffusion(latent_unet, vae, diffusion_latent, source_images, strength=0.6)
 
-        # Log Metrics (Accuracy as MSE vs Source)
+        # Log Metrics
         mlflow.log_metric("mse_ddpm", F.mse_loss(res_ddpm, source_images).item())
         mlflow.log_metric("mse_ddim", F.mse_loss(res_ddim, source_images).item())
         mlflow.log_metric("mse_sd", F.mse_loss(res_sd, source_images).item())
@@ -113,10 +112,12 @@ def main():
         # Save Visual Grid
         all_results = torch.cat([source_images, res_ddpm, res_ddim, res_sd], dim=0)
         grid = make_grid(all_results, nrow=8, normalize=True)
+        plt.figure(figsize=(15, 8))
         plt.imshow(grid.permute(1, 2, 0).cpu().numpy())
         plt.title("Source | DDPM | DDIM | Stable Diffusion")
         plt.savefig("i2i_comparison.png")
         mlflow.log_artifact("i2i_comparison.png")
+        print("[*] Benchmark Complete. Saved i2i_comparison.png")
 
 if __name__ == "__main__":
     main()
