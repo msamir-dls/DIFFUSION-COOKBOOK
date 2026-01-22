@@ -1,9 +1,3 @@
-A professional **README.md** is the "landing page" of your project. For an AI/ML role, recruiters look for a clear explanation of the **architecture**, the **mathematical trade-offs**, and the **benchmarking results**.
-
-Here is a complete, high-quality template you can use for your repository.
-
----
-
 # MNIST Diffusion Comparison: DDPM, DDIM, & Stable Diffusion
 
 A professional benchmark suite for **Image-to-Image (I2I) translation** comparing three industry-standard diffusion paradigms. This project evaluates models on **Training Time**, **Inference Latency**, and **Structural Accuracy (MSE)** using a modular, YAML-configured pipeline with **MLflow** tracking.
